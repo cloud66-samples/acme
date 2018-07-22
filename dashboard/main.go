@@ -49,7 +49,8 @@ func main() {
 	logger.Printf("Server is starting on %s...\n", listenAddr)
 
 	router := http.NewServeMux()
-	router.Handle("/", index())
+	router.Handle("/", http.FileServer(http.Dir("./static")))
+	router.Handle("/size", sizeRoute())
 	router.Handle("/healthz", healthz())
 
 	nextRequestID := func() string {
@@ -115,12 +116,8 @@ func fetch() (int64, error) {
 	return size, nil
 }
 
-func index() http.Handler {
+func sizeRoute() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/size" {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +26,8 @@ var (
 func main() {
 	flag.StringVar(&redisAddress, "redis", "localhost:6379", "Connection to redis")
 	flag.Parse()
+
+	rand.Seed(time.Now().Unix())
 
 	cancel := make(chan os.Signal)
 	signal.Notify(cancel, os.Interrupt, syscall.SIGTERM)
@@ -65,6 +68,13 @@ func setupClient() error {
 }
 
 func sell() error {
-	_, err := client.LPush(keyName, 1).Result()
-	return err
+	count := rand.Intn(10)
+	for i := 0; i < count; i++ {
+		_, err := client.LPush(keyName, 1).Result()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
