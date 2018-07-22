@@ -46,7 +46,7 @@ func main() {
 	}
 
 	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
-	logger.Println("Server is starting...")
+	logger.Printf("Server is starting on %s...\n", listenAddr)
 
 	router := http.NewServeMux()
 	router.Handle("/", index())
