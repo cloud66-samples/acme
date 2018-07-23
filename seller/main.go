@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	interval = 1 * time.Second
-	keyName  = "acme:queue"
+	interval  = 1 * time.Second
+	keyName   = "acme:queue"
+	histogram = "acme:histogram"
 )
 
 var (
@@ -74,6 +75,15 @@ func sell() error {
 		if err != nil {
 			return err
 		}
+	}
+	_, err := client.LPush(histogram, count).Result()
+	if err != nil {
+		return err
+	}
+
+	_, err = client.LTrim(histogram, 0, 100).Result()
+	if err != nil {
+		return err
 	}
 
 	return nil

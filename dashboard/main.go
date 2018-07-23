@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,8 +21,12 @@ import (
 type key int
 
 const (
+	interval         = 1 * time.Second
 	keyName          = "acme:queue"
+	histogram        = "acme:histogram"
 	requestIDKey key = 0
+	MaxDiv           = 5
+	SeedBase         = 200
 )
 
 var (
@@ -39,6 +46,8 @@ func main() {
 	cancel := make(chan os.Signal)
 	signal.Notify(cancel, os.Interrupt, syscall.SIGTERM)
 
+	rand.Seed(time.Now().Unix())
+
 	err := setupClient()
 	if err != nil {
 		fmt.Printf("Failed to connect to Redis on %s due to %s\n", redisAddress, err.Error())
@@ -51,6 +60,7 @@ func main() {
 	router := http.NewServeMux()
 	router.Handle("/", http.FileServer(http.Dir("./static")))
 	router.Handle("/size", sizeRoute())
+	router.Handle("/histogram", histogramRoute())
 	router.Handle("/healthz", healthz())
 
 	nextRequestID := func() string {
@@ -69,6 +79,32 @@ func main() {
 	done := make(chan bool)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
+
+	seed := rand.Float64() + SeedBase
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		for {
+			select {
+			case <-quit:
+				fmt.Println("Leaving...")
+				ticker.Stop()
+				os.Exit(1)
+			case <-ticker.C:
+				fmt.Println("Getting tickers...")
+				dp, close := createDatapoint(seed)
+				seed = close
+				dpJSON, err := json.Marshal(dp)
+				if err != nil {
+					fmt.Printf("Failed to serialise tickers due to %s\n", err.Error())
+				}
+				_, err = client.LPush(histogram, dpJSON).Result()
+				if err != nil {
+					fmt.Printf("Failed to write tickers due to %s\n", err.Error())
+				}
+			}
+		}
+	}()
 
 	go func() {
 		<-quit
@@ -93,6 +129,54 @@ func main() {
 
 	<-done
 	logger.Println("Server stopped")
+}
+
+// seed is last tick's close
+func createDatapoint(seed float64) ([]float64, float64) {
+	t := time.Now().Unix()
+	open := getValue(seed)
+	close := getValue(seed)
+	high := getHigh(open, close)
+	low := getLow(open, close)
+
+	return []float64{float64(t), open, close, high, low}, close
+}
+
+func getDir() float64 {
+	dir := rand.Float64()
+	if dir > 0.5 {
+		return 1
+	} else {
+		return -1
+	}
+}
+
+func getHigh(open, close float64) float64 {
+	day := []float64{open, close, getValue(open)}
+	max := 0.0
+	for _, n := range day {
+		max = math.Max(max, n)
+	}
+
+	return max
+}
+
+func getLow(open, close float64) float64 {
+	day := []float64{open, close, getValue(open)}
+	min := 99999999.00
+	for _, n := range day {
+		min = math.Min(min, n)
+	}
+
+	return min
+}
+
+func getValue(seed float64) float64 {
+	return seed + (getDir() * getDiv())
+}
+
+func getDiv() float64 {
+	return float64(rand.Intn(MaxDiv))
 }
 
 func setupClient() error {
@@ -122,11 +206,25 @@ func sizeRoute() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 
-		size, err := fetch()
-		if err != nil {
-
-		}
+		size, _ := fetch()
 		fmt.Fprintf(w, "{ \"size\": %d }", size)
+	})
+}
+
+func histogramRoute() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+
+		ticker, _ := client.RPop(histogram).Result()
+		var day []float64
+		fmt.Printf("Ticker %s\n", ticker)
+		err := json.Unmarshal([]byte(ticker), &day)
+		if err != nil {
+			fmt.Printf("Failed to unmarshal ticker due to %s\n", err.Error())
+		}
+		json.NewEncoder(w).Encode(day)
 	})
 }
 
