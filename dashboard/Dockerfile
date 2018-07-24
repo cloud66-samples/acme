@@ -3,6 +3,9 @@ FROM golang:1.10
 WORKDIR /go/src/dashboard
 COPY main.go .
 RUN go get -d -v ./...
-RUN go install -v ./...
+RUN go build
 
-CMD ["dashboard"]
+RUN mkdir static
+COPY static/. static/.
+
+CMD ["/go/src/dashboard/dashboard"]
